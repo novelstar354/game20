@@ -2,245 +2,150 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>HTML パチンコ フル統合版</title>
+<title>PACHINKO ULTIMATE</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <style>
-body{
- margin:0;
- background:#020617;
- color:#fff;
- font-family:sans-serif;
- text-align:center;
+html,body{margin:0;background:#020617;color:#fff;font-family:sans-serif;overflow:hidden}
+#ui{position:fixed;top:8px;left:8px;z-index:10;font-size:13px}
+button{padding:6px 10px;border:none;border-radius:8px;margin:2px;background:#22c55e;color:#000}
+canvas{display:block}
+#msg{
+ position:fixed;inset:0;display:flex;
+ align-items:center;justify-content:center;
+ font-size:48px;font-weight:bold;
+ pointer-events:none;opacity:0;
 }
-h1{margin:8px 0}
-#ui{
- display:flex;
- justify-content:center;
- gap:6px;
- flex-wrap:wrap;
- margin-bottom:6px;
-}
-button,select{
- padding:8px 12px;
- border:none;
- border-radius:8px;
- font-size:14px;
-}
-button{background:#22c55e;color:#000}
-select{background:#0f172a;color:#fff}
-canvas{
- background:#0f172a;
- margin:auto;
- display:block;
- border:3px solid #facc15;
- border-radius:14px;
-}
-#lever{
- width:60px;
- height:200px;
- background:#334155;
- margin:10px auto;
- border-radius:30px;
- position:relative;
- touch-action:none;
-}
-#knob{
- width:50px;
- height:50px;
- background:#facc15;
- border-radius:50%;
- position:absolute;
- left:5px;
- top:10px;
-}
-#jackpot{
- position:absolute;
- inset:0;
- display:flex;
- align-items:center;
- justify-content:center;
- font-size:48px;
- background:rgba(0,0,0,0.6);
- display:none;
-}
+.flash{position:fixed;inset:0;background:white;opacity:0;pointer-events:none}
 </style>
 </head>
 <body>
 
-<h1>🎰 パチンコ</h1>
-
 <div id="ui">
- 玉: <span id="balls">50</span>
- <button onclick="toggleSound()">🔊</button>
- <button onclick="resetSave()">🗑 セーブ削除</button>
- <select id="pegPower">
-  <option value="0.04">釘：弱</option>
-  <option value="0.07" selected>釘：中</option>
-  <option value="0.12">釘：強</option>
- </select>
- <button onclick="toggleFull()">FULL</button>
+ 出玉:<span id="balls">0</span><br>
+ 最高:<span id="best">0</span><br>
+ モード:<span id="mode">NORMAL</span><br>
+ <button id="shoot">発射</button>
+ <button id="auto">AUTO</button>
+ <button id="sound">SOUND</button>
+ <button id="fs">FULL</button>
+ <button id="reset">RESET</button>
 </div>
 
-<canvas id="game" width="360" height="600"></canvas>
-
-<div id="lever">
- <div id="knob"></div>
-</div>
-
-<div id="jackpot">🎉 大当たり 🎉</div>
-
-<!-- 音 -->
-<audio id="bgm" loop src="https://cdn.pixabay.com/audio/2022/10/03/audio_1b2f0d6d53.mp3"></audio>
-<audio id="se" src="https://cdn.pixabay.com/audio/2022/03/15/audio_9a6bdf6e5d.mp3"></audio>
+<div id="msg"></div>
+<div class="flash" id="flash"></div>
+<canvas id="c"></canvas>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const bgm = document.getElementById("bgm");
-const se = document.getElementById("se");
+const c=document.getElementById("c"),ctx=c.getContext("2d");
+function resize(){c.width=innerWidth;c.height=innerHeight}
+resize();addEventListener("resize",resize);
 
-let balls = Number(localStorage.getItem("balls")) || 50;
-document.getElementById("balls").textContent = balls;
+/* 状態 */
+let balls=[],pins=[];
+let out=0,best=+localStorage.best||0,shots=0;
+let rush=false,auto=false,sound=true;
 
-let soundOn=true;
-bgm.volume=0.4;
-se.volume=0.7;
-bgm.play();
+/* UI */
+bestSpan.textContent=best;
 
-const gravity=0.25;
-let activeBalls=[];
-let flash=0;
+/* 効果音 */
+const ac=new AudioContext();
+function se(f,t=0.1){
+ if(!sound)return;
+ const o=ac.createOscillator(),g=ac.createGain();
+ o.frequency.value=f;o.connect(g);g.connect(ac.destination);
+ g.gain.value=0.12;o.start();o.stop(ac.currentTime+t);
+}
 
-const pegs=[];
-for(let y=80;y<520;y+=60){
- for(let x=60;x<300;x+=60){
-  pegs.push({x:x+(y%120?30:0),y});
+/* ピン */
+for(let y=140;y<innerHeight-220;y+=60){
+ for(let x=30;x<innerWidth;x+=60){
+  pins.push({x,y,r:5});
  }
 }
-const pocket={x:180,y:560,r:28};
 
-class Ball{
- constructor(power){
-  this.x=180;
-  this.y=30;
-  this.vx=(Math.random()-0.5)*power;
-  this.vy=2;
-  this.r=5;
- }
- update(){
-  this.vy+=gravity;
-  this.x+=this.vx;
-  this.y+=this.vy;
-  if(this.x<this.r||this.x>canvas.width-this.r) this.vx*=-0.9;
+/* 発射 */
+function shoot(){
+ balls.push({x:c.width/2,y:40,vx:(Math.random()-0.5)*2,vy:2,r:6,alive:true});
+ shots++; se(500);
+}
+shootBtn.onclick=shoot;
+c.addEventListener("touchstart",shoot);
 
-  const pegForce=Number(document.getElementById("pegPower").value);
-  for(const p of pegs){
-   const dx=this.x-p.x,dy=this.y-p.y;
-   const d=Math.hypot(dx,dy);
-   if(d<12){
-    this.vx+=dx*pegForce;
-    this.vy+=dy*pegForce;
+/* ボタン */
+autoBtn.onclick=()=>auto=!auto;
+soundBtn.onclick=()=>sound=!sound;
+fsBtn.onclick=()=>document.body.requestFullscreen();
+resetBtn.onclick=()=>{
+ localStorage.clear();
+ out=best=shots=0;
+ ballsSpan.textContent=0;bestSpan.textContent=0;
+}
+
+/* キーボード */
+addEventListener("keydown",e=>{
+ if(e.key===" ")shoot();
+ if(e.key==="a")auto=!auto;
+ if(e.key==="f")document.body.requestFullscreen();
+});
+
+/* 演出 */
+function show(text,color){
+ msg.textContent=text;
+ msg.style.color=color;
+ msg.style.opacity=1;
+ setTimeout(()=>msg.style.opacity=0,1000);
+}
+function flash(){
+ flashDiv.style.opacity=1;
+ setTimeout(()=>flashDiv.style.opacity=0,120);
+}
+
+/* ループ */
+function loop(){
+ ctx.clearRect(0,0,c.width,c.height);
+
+ // ピン
+ ctx.fillStyle="#64748b";
+ pins.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()});
+
+ // 入賞ゾーン
+ const gy=c.height-80;
+ ctx.fillStyle=rush?"#fb7185":"#facc15";
+ ctx.fillRect(0,gy,c.width,50);
+
+ balls.forEach(b=>{
+  if(!b.alive)return;
+  b.vy+=0.08;b.x+=b.vx;b.y+=b.vy;
+  if(b.x<b.r||b.x>c.width-b.r)b.vx*=-1;
+
+  pins.forEach(p=>{
+   const d=Math.hypot(b.x-p.x,b.y-p.y);
+   if(d<b.r+p.r){b.vx+=(b.x-p.x)*0.02;b.vy=-Math.abs(b.vy)}
+  });
+
+  if(b.y>gy){
+   let add=rush?15:5;
+   if(Math.random()<0.08){
+    add=100;rush=true;
+    show("BIG BONUS!","gold");flash();se(1200,0.3);
    }
+   out+=add;
+   if(out>best){best=out;localStorage.best=best}
+   ballsSpan.textContent=out;
+   bestSpan.textContent=best;
+   modeSpan.textContent=rush?"RUSH":"NORMAL";
+   b.alive=false;se(800);
   }
-  const dx=this.x-pocket.x,dy=this.y-pocket.y;
-  if(Math.hypot(dx,dy)<pocket.r){
-   jackpot();
-   return false;
-  }
-  return this.y<canvas.height+20;
- }
- draw(){
-  ctx.fillStyle="#e5e7eb";
-  ctx.beginPath();
-  ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
-  ctx.fill();
- }
-}
 
-function jackpot(){
- balls+=50;
- flash=30;
- document.getElementById("jackpot").style.display="flex";
- if(soundOn) se.play();
- setTimeout(()=>document.getElementById("jackpot").style.display="none",1200);
- save();
-}
-
-function launch(power=3){
- if(balls<=0) return;
- balls--;
- activeBalls.push(new Ball(power));
- document.getElementById("balls").textContent=balls;
- save();
-}
-
-function draw(){
- ctx.clearRect(0,0,canvas.width,canvas.height);
- if(flash>0){
-  ctx.fillStyle="rgba(250,204,21,0.2)";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  flash--;
- }
- ctx.fillStyle="#94a3b8";
- pegs.forEach(p=>{
-  ctx.beginPath();
-  ctx.arc(p.x,p.y,4,0,Math.PI*2);
-  ctx.fill();
+  ctx.fillStyle="#38bdf8";
+  ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
  });
- ctx.fillStyle="#ef4444";
- ctx.beginPath();
- ctx.arc(pocket.x,pocket.y,pocket.r,0,Math.PI*2);
- ctx.fill();
 
- activeBalls=activeBalls.filter(b=>{
-  b.draw();
-  return b.update();
- });
- requestAnimationFrame(draw);
+ if(auto && Math.random()<0.04)shoot();
+ requestAnimationFrame(loop);
 }
-draw();
-
-function save(){
- localStorage.setItem("balls",balls);
-}
-function resetSave(){
- localStorage.removeItem("balls");
- location.reload();
-}
-function toggleSound(){
- soundOn=!soundOn;
- soundOn?bgm.play():bgm.pause();
-}
-function toggleFull(){
- document.fullscreenElement?document.exitFullscreen():canvas.requestFullscreen();
-}
-
-document.addEventListener("keydown",e=>{
- if(e.code==="Space") launch();
- if(e.key==="f") toggleFull();
-});
-
-/* 仮想レバー */
-const lever=document.getElementById("lever");
-const knob=document.getElementById("knob");
-let dragging=false,startY=0;
-
-lever.addEventListener("pointerdown",e=>{
- dragging=true;
- startY=e.clientY;
-});
-window.addEventListener("pointermove",e=>{
- if(!dragging) return;
- let dy=Math.min(120,Math.max(0,e.clientY-startY));
- knob.style.top=10+dy+"px";
-});
-window.addEventListener("pointerup",e=>{
- if(!dragging) return;
- dragging=false;
- let power=2+Number(knob.style.top.replace("px","")||0)/40;
- knob.style.top="10px";
- launch(power);
-});
+loop();
 </script>
 </body>
 </html>
