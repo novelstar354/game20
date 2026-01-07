@@ -1,207 +1,207 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>究極パチンコ フル統合版</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta charset="UTF-8" />
+<title>ブラウザ パチンコ 完全版（確定大当たり・修正版）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 <style>
-body{
-  margin:0;background:#020617;color:#fff;
-  font-family:sans-serif;text-align:center;overflow:hidden
-}
-h1{
-  margin:8px;font-size:22px;
-  transition:.3s;
-}
-.kaku h1{ color:#facc15; text-shadow:0 0 10px #fde047 }
-#ui{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-bottom:6px}
-button{
-  padding:10px 14px;font-size:15px;border:none;
-  border-radius:10px;cursor:pointer
-}
-#fire{background:#22c55e}
-#fs{background:#38bdf8}
-#reset{background:#ef4444}
-#auto{background:#a855f7}
-canvas{background:#020617;display:block;margin:0 auto;border-radius:14px}
-#panel{margin-top:4px;font-size:14px}
-#effect{position:fixed;inset:0;pointer-events:none}
+body{margin:0;background:#020617;color:#fff;font-family:sans-serif;text-align:center;}
+header{padding:10px;background:#020617;font-size:18px;font-weight:bold;}
+#game{position:relative;margin:0 auto;max-width:420px;height:640px;background:#020617;overflow:hidden;border:3px solid #38bdf8;border-radius:12px;}
+canvas{display:block;}
+#ui{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:8px;background:#020617;}
+button,input[type=range]{padding:8px;font-size:14px;border:none;border-radius:8px;}
+button{background:#38bdf8;color:#000;font-weight:bold;}
+#status{width:100%;font-size:14px;margin-bottom:4px;}
+#lever{position:absolute;right:10px;bottom:60px;width:40px;height:160px;background:#334155;border-radius:20px;}
+#leverKnob{position:absolute;left:50%;transform:translateX(-50%);width:50px;height:50px;background:#facc15;border-radius:50%;top:0;touch-action:none;}
+#bigWin{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);flex-direction:column;z-index:5;}
+#bigWin span{font-size:42px;color:#facc15;font-weight:bold;animation:zoom 1s infinite alternate;}
+@keyframes zoom{from{transform:scale(1);}to{transform:scale(1.25);}}
+#rain{position:absolute;inset:0;pointer-events:none;z-index:6;}
 </style>
 </head>
-
 <body>
-<h1>🎰 究極パチンコ（完全版）</h1>
-
-<div id="ui">
-  <button id="fire">発射</button>
-  <button id="auto">AUTO OFF</button>
-  <button id="fs">FULL</button>
-  <button id="reset">RESET</button>
+<header>🎰 ブラウザ パチンコ【確定大当たりゾーン】</header>
+<div id="game">
+  <canvas id="c" width="420" height="640"></canvas>
+  <div id="lever"><div id="leverKnob"></div></div>
+  <div id="bigWin"><span>🎉 大当たり確定！ 🎉</span></div>
+  <canvas id="rain" width="420" height="640"></canvas>
 </div>
 <div id="ui">
-  <button id="save">SAVE</button>
-  <button id="load">LOAD</button>
-  <button id="sound">SOUND ON</button>
+  <div id="status">玉:<span id="balls">100</span>｜釘強度:<span id="pinPow">1.0</span></div>
+  <button id="shot">発射</button>
+  <button id="save">セーブ</button>
+  <button id="load">ロード</button>
+  <button id="del">削除</button>
+  釘調整<input id="pinRange" type="range" min="0.5" max="2" step="0.1" value="1">
 </div>
-
-<canvas id="c" width="360" height="640"></canvas>
-<div id="panel">
-玉:<span id="balls">0</span>｜
-得点:<span id="score">0</span>｜
-確変:<span id="kaku">OFF</span>
-</div>
-<canvas id="effect"></canvas>
-
 <script>
-/* ===== DOM ===== */
-const fireBtn=fire, autoBtn=auto, fsBtn=fs, resetBtn=reset;
-const saveBtn=save, loadBtn=load, soundBtn=sound;
-const ballsSpan=balls, scoreSpan=score, kakuSpan=kaku;
-const c=document.getElementById('c'), ctx=c.getContext('2d');
-const efx=document.getElementById('effect'), ectx=efx.getContext('2d');
+// ===== Canvas =====
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const rain = document.getElementById('rain');
+const rctx = rain.getContext('2d');
 
-/* ===== 状態 ===== */
-let W=c.width,H=c.height;
-let balls=[], pins=[];
-let score=0, ballCount=50;
-let auto=false, kakuhen=false, soundOn=true;
+// ===== UI =====
+const ballsEl = document.getElementById('balls');
+const pinPowEl = document.getElementById('pinPow');
+const bigWinEl = document.getElementById('bigWin');
 
-/* ===== 音 ===== */
-const seFire=new Audio();
-const seHit=new Audio();
+// ===== Game State =====
+let balls = 100;
+let ballList = [];
+let pins = [];
+let gravity = 0.22;
+let pinPower = 1.0;
 
-/* ===== リサイズ ===== */
-function resize(){
-  const s=Math.min(innerWidth/W,(innerHeight-150)/H);
-  c.style.transform=`scale(${s})`;
-  efx.width=innerWidth; efx.height=innerHeight;
-}
-addEventListener('resize',resize); resize();
+// ★ 小さくて動く・出現する 確定大当たりゾーン
+let jackpotZone = { x: 200, y: 520, w: 30, h: 22 };
+let zoneVX = 1.6;
+let zoneVY = 0.8;
+let zoneVisible = true;
+let zoneTimer = 0;
 
-/* ===== ボール ===== */
-class Ball{
-  constructor(){
-    this.x=W/2+(Math.random()*40-20);
-    this.y=20; this.vx=Math.random()*2-1; this.vy=2;
-    this.r=5; this.alive=true;
-  }
-  update(){
-    this.vy+=0.06;
-    this.x+=this.vx; this.y+=this.vy;
-    if(this.x<this.r||this.x>W-this.r) this.vx*=-1;
-
-    for(const p of pins){
-      const d=Math.hypot(this.x-p.x,this.y-p.y);
-      if(d<this.r+p.r){
-        const a=Math.atan2(this.y-p.y,this.x-p.x);
-        this.vx=Math.cos(a)*2.5;
-        this.vy=Math.sin(a)*2.5;
-      }
-    }
-    if(this.y>H-40){
-      if(this.x>W*0.4&&this.x<W*0.6) hit();
-      this.alive=false;
+// ===== Init =====
+function initPins(){
+  pins = [];
+  for(let y=120;y<480;y+=60){
+    for(let x=80;x<340;x+=60){
+      pins.push({x:x+(y%120?30:0), y});
     }
   }
-  draw(){
-    ctx.fillStyle='#e5e7eb';
-    ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();
-  }
 }
+initPins();
 
-/* ===== 釘 ===== */
-for(let y=120;y<480;y+=50)
-for(let x=50;x<W-40;x+=50)
-pins.push({x:x+(y%100?25:0),y,r:6});
+function updateStatus(){ ballsEl.textContent = balls; }
 
-/* ===== 当たり ===== */
-function hit(){
-  score+=kakuhen?500:100;
-  confetti();
-  if(Math.random()<0.25){
-    kakuhen=true;
-    document.body.classList.add('kaku');
-    setTimeout(()=>{
-      kakuhen=false;
-      document.body.classList.remove('kaku');
-    },8000);
-  }
-}
-
-/* ===== 描画 ===== */
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#38bdf8';
-  pins.forEach(p=>{
-    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+// ===== Shooting =====
+function shoot(strength=1){
+  if(balls<=0) return;
+  balls--;
+  updateStatus();
+  ballList.push({
+    x:210,
+    y:40,
+    vx:(Math.random()-0.5)*2*strength,
+    vy:2*strength
   });
-  ctx.fillStyle=kakuhen?'#facc15':'#22c55e';
-  ctx.fillRect(W*0.4,H-30,W*0.2,20);
-
-  balls.forEach(b=>b.update());
-  balls=balls.filter(b=>b.alive);
-  balls.forEach(b=>b.draw());
-
-  ballsSpan.textContent=ballCount;
-  scoreSpan.textContent=score;
-  kakuSpan.textContent=kakuhen?'ON':'OFF';
-
-  requestAnimationFrame(draw);
 }
-draw();
 
-/* ===== 操作 ===== */
-function fire(){
-  if(ballCount<=0)return;
-  balls.push(new Ball()); ballCount--;
+document.getElementById('shot').onclick = () => shoot(1);
+
+// ===== Virtual Lever =====
+const knob = document.getElementById('leverKnob');
+let dragging=false, startY=0;
+knob.addEventListener('pointerdown',e=>{ dragging=true; startY=e.clientY; });
+window.addEventListener('pointerup',()=>{
+  if(!dragging) return;
+  const pull = Math.min(1, Math.max(0, knob.offsetTop/100));
+  shoot(0.6 + pull*2);
+  knob.style.top='0px';
+  dragging=false;
+});
+window.addEventListener('pointermove',e=>{
+  if(!dragging) return;
+  const dy = e.clientY - startY;
+  knob.style.top = Math.min(100, Math.max(0, dy)) + 'px';
+});
+
+// ===== Pin Control =====
+const pinRange = document.getElementById('pinRange');
+pinRange.oninput = () => {
+  pinPower = parseFloat(pinRange.value);
+  pinPowEl.textContent = pinPower.toFixed(1);
+};
+
+// ===== Save / Load =====
+function save(){ localStorage.setItem('pachinkoSave', JSON.stringify({balls,pinPower})); }
+function load(){
+  const d = JSON.parse(localStorage.getItem('pachinkoSave')||'null');
+  if(!d) return;
+  balls=d.balls; pinPower=d.pinPower;
+  pinRange.value=pinPower; pinPowEl.textContent=pinPower.toFixed(1);
+  updateStatus();
 }
-fireBtn.onclick=fire;
-c.addEventListener('touchstart',fire);
+function del(){ localStorage.removeItem('pachinkoSave'); }
 
-autoBtn.onclick=()=>{
-  auto=!auto;
-  autoBtn.textContent=auto?'AUTO ON':'AUTO OFF';
-};
+document.getElementById('save').onclick=save;
+document.getElementById('load').onclick=load;
+document.getElementById('del').onclick=del;
 
-setInterval(()=>auto&&fire(),300);
+// ===== Big Win =====
+function bigWin(){
+  bigWinEl.style.display='flex';
+  balls += 50;
+  updateStatus();
+  startRain();
+  setTimeout(()=>bigWinEl.style.display='none',2500);
+}
 
-fsBtn.onclick=()=>{
-  if(!document.fullscreenElement) document.body.requestFullscreen();
-  else document.exitFullscreen();
-};
+function startRain(){
+  let drops=[];
+  for(let i=0;i<90;i++) drops.push({x:Math.random()*420,y:Math.random()*-640,v:2+Math.random()*4});
+  let t=0;
+  (function anim(){
+    rctx.clearRect(0,0,420,640);
+    rctx.fillStyle='#facc15';
+    drops.forEach(d=>{ d.y+=d.v; rctx.fillRect(d.x,d.y,4,10); });
+    t++;
+    if(t<140) requestAnimationFrame(anim);
+    else rctx.clearRect(0,0,420,640);
+  })();
+}
 
-resetBtn.onclick=()=>{
-  balls=[]; score=0; ballCount=50;
-  kakuhen=false; auto=false;
-  autoBtn.textContent='AUTO OFF';
-  document.body.classList.remove('kaku');
-};
-
-/* ===== SAVE / LOAD ===== */
-saveBtn.onclick=()=>{
-  localStorage.setItem('pachiSave',JSON.stringify({
-    score,ballCount,kakuhen,auto
-  }));
-  alert('セーブ完了');
-};
-loadBtn.onclick=()=>{
-  const d=localStorage.getItem('pachiSave');
-  if(!d)return alert('データなし');
-  const s=JSON.parse(d);
-  score=s.score; ballCount=s.ballCount;
-  kakuhen=s.kakuhen; auto=s.auto;
-  autoBtn.textContent=auto?'AUTO ON':'AUTO OFF';
-};
-
-/* ===== 演出 ===== */
-function confetti(){
-  ectx.clearRect(0,0,efx.width,efx.height);
-  for(let i=0;i<80;i++){
-    ectx.fillStyle=`hsl(${Math.random()*360},80%,60%)`;
-    ectx.fillRect(Math.random()*efx.width,Math.random()*efx.height,4,4);
+// ===== Main Loop =====
+function update(){
+  // Zone movement & visibility
+  zoneTimer++;
+  if(zoneTimer%180===0) zoneVisible=!zoneVisible;
+  if(zoneVisible){
+    jackpotZone.x+=zoneVX;
+    jackpotZone.y+=zoneVY;
+    if(jackpotZone.x<70||jackpotZone.x+jackpotZone.w>350) zoneVX*=-1;
+    if(jackpotZone.y<470||jackpotZone.y+jackpotZone.h>560) zoneVY*=-1;
   }
-  setTimeout(()=>ectx.clearRect(0,0,efx.width,efx.height),300);
+
+  ctx.clearRect(0,0,420,640);
+
+  // Pins
+  ctx.fillStyle='#94a3b8';
+  pins.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); });
+
+  // Jackpot Zone
+  if(zoneVisible){
+    ctx.fillStyle='rgba(250,204,21,0.45)';
+    ctx.fillRect(jackpotZone.x,jackpotZone.y,jackpotZone.w,jackpotZone.h);
+    ctx.strokeStyle='#facc15'; ctx.lineWidth=3;
+    ctx.strokeRect(jackpotZone.x,jackpotZone.y,jackpotZone.w,jackpotZone.h);
+    ctx.lineWidth=1;
+  }
+
+  // Balls
+  ctx.fillStyle='#e5e7eb';
+  ballList.forEach(b=>{
+    b.vy+=gravity; b.x+=b.vx; b.y+=b.vy;
+    pins.forEach(p=>{
+      const dx=b.x-p.x, dy=b.y-p.y;
+      const d=Math.hypot(dx,dy);
+      if(d<8){ b.vx+=(dx/d)*0.4*pinPower; b.vy+=(dy/d)*0.4*pinPower; }
+    });
+    if(b.x<5||b.x>415) b.vx*=-1;
+
+    if(zoneVisible && b.x>jackpotZone.x && b.x<jackpotZone.x+jackpotZone.w && b.y>jackpotZone.y && b.y<jackpotZone.y+jackpotZone.h){
+      bigWin(); b.y=700;
+    }
+
+    ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill();
+  });
+
+  ballList = ballList.filter(b=>b.y<660);
+  requestAnimationFrame(update);
 }
+update();
 </script>
 </body>
 </html>
