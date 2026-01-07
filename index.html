@@ -86,11 +86,10 @@ footer {
  <button onclick="save()">SAVE</button>
  <button onclick="load()">LOAD</button>
  <button onclick="del()">DEL</button>
- <button onclick="fs()">FULL</button>
+ <button onclick="toggleFullscreen()">FULL</button>
 </div>
-
 <footer>
-       © 2025 STAR CORPORATION - All Rights Reserved.
+       © 2025 GAMEHUB - All Rights Reserved.
    </footer>
 <script>
 /* ===== Canvas ===== */
@@ -164,13 +163,24 @@ document.onpointermove=e=>{
  if(drag) knob.style.top=Math.min(100,Math.max(0,e.clientY-sy))+"px";
 }
 
+function toggleFullscreen(){
+ if(!document.fullscreenElement){
+  document.getElementById("game").requestFullscreen();
+ }else{
+  document.exitFullscreen();
+ }
+}
+    
 /* ===== Key ===== */
-onkeydown=e=>{
- if(e.code==="Space") shoot();
- if(e.key==="a") toggleAuto();
- if(e.key==="b") toggleBgm();
- if(e.key==="f") fs();
+onkeydown = e => {
+ if(e.code === "Space") shoot();
+ if(e.key === "a") toggleAuto();
+ if(e.key === "b") toggleBgm();
+ if(e.key === "f") toggleFullscreen();
 };
+
+    
+
 
 /* ===== Save ===== */
 function save(){localStorage.setItem("pachi",JSON.stringify({balls}))}
