@@ -20,6 +20,14 @@ button{background:#38bdf8;color:#000;font-weight:bold;}
 #bigWin span{font-size:42px;color:#facc15;font-weight:bold;animation:zoom 1s infinite alternate;}
 @keyframes zoom{from{transform:scale(1);}to{transform:scale(1.25);}}
 #rain{position:absolute;inset:0;pointer-events:none;z-index:6;}
+   footer {
+           padding: 30px;
+           text-align: center;
+           font-size: 0.85rem;
+           color: rgba(255,255,255,0.5);
+           border-top: 1px solid rgba(255,255,255,0.1);
+           margin-top: 60px;
+   }
 </style>
 </head>
 <body>
@@ -38,6 +46,10 @@ button{background:#38bdf8;color:#000;font-weight:bold;}
   <button id="del">削除</button>
   釘調整<input id="pinRange" type="range" min="0.5" max="2" step="0.1" value="1">
 </div>
+    <footer>
+       © 2025 GAMEHUB - All Rights Reserved.
+   </footer>
+
 <script>
 // ===== Canvas =====
 const c = document.getElementById('c');
