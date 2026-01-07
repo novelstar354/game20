@@ -2,150 +2,233 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>PACHINKO ULTIMATE</title>
+<title>究極パチンコ フル統合版</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <style>
-html,body{margin:0;background:#020617;color:#fff;font-family:sans-serif;overflow:hidden}
-#ui{position:fixed;top:8px;left:8px;z-index:10;font-size:13px}
-button{padding:6px 10px;border:none;border-radius:8px;margin:2px;background:#22c55e;color:#000}
-canvas{display:block}
-#msg{
- position:fixed;inset:0;display:flex;
- align-items:center;justify-content:center;
- font-size:48px;font-weight:bold;
- pointer-events:none;opacity:0;
-}
-.flash{position:fixed;inset:0;background:white;opacity:0;pointer-events:none}
+body{margin:0;background:#020617;color:#fff;font-family:sans-serif;text-align:center;overflow:hidden}
+h1{margin:8px;font-size:22px}
+#ui{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-bottom:6px}
+button{padding:10px 14px;font-size:15px;border:none;border-radius:10px;cursor:pointer}
+#fire{background:#22c55e}
+#fs{background:#38bdf8}
+#reset{background:#ef4444}
+#auto{background:#a855f7}
+canvas{background:#020617;display:block;margin:0 auto;border-radius:14px}
+#panel{margin-top:4px;font-size:14px}
+#effect{position:fixed;inset:0;pointer-events:none}
 </style>
 </head>
 <body>
+<h1>🎰 究極パチンコ（完全版）</h1>
 
 <div id="ui">
- 出玉:<span id="balls">0</span><br>
- 最高:<span id="best">0</span><br>
- モード:<span id="mode">NORMAL</span><br>
- <button id="shoot">発射</button>
- <button id="auto">AUTO</button>
- <button id="sound">SOUND</button>
- <button id="fs">FULL</button>
- <button id="reset">RESET</button>
+  <button id="fire">発射</button>
+  <button id="auto">AUTO</button>
+  <button id="fs">FULL</button>
+  <button id="reset">RESET</button>
+</div>
+<div id="ui">
+  <button id="save">SAVE</button>
+  <button id="load">LOAD</button>
+  <button id="sound">SOUND ON</button>
 </div>
 
-<div id="msg"></div>
-<div class="flash" id="flash"></div>
-<canvas id="c"></canvas>
+<canvas id="c" width="360" height="640"></canvas>
+<div id="panel">玉:<span id="balls">0</span>｜得点:<span id="score">0</span>｜確変:<span id="kaku">OFF</span></div>
+<canvas id="effect"></canvas>
 
 <script>
-const c=document.getElementById("c"),ctx=c.getContext("2d");
-function resize(){c.width=innerWidth;c.height=innerHeight}
-resize();addEventListener("resize",resize);
+// ===== DOM取得（先に必ず定義） =====
+const fireBtn = document.getElementById('fire');
+const autoBtn = document.getElementById('auto');
+const fsBtn = document.getElementById('fs');
+const resetBtn = document.getElementById('reset');
+const saveBtn = document.getElementById('save');
+const loadBtn = document.getElementById('load');
+const soundBtn = document.getElementById('sound');
 
-/* 状態 */
-let balls=[],pins=[];
-let out=0,best=+localStorage.best||0,shots=0;
-let rush=false,auto=false,sound=true;
+const ballsSpan = document.getElementById('balls');
+const scoreSpan = document.getElementById('score');
+const kakuSpan  = document.getElementById('kaku');
 
-/* UI */
-bestSpan.textContent=best;
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const efx = document.getElementById('effect');
+const ectx = efx.getContext('2d');
 
-/* 効果音 */
-const ac=new AudioContext();
-function se(f,t=0.1){
- if(!sound)return;
- const o=ac.createOscillator(),g=ac.createGain();
- o.frequency.value=f;o.connect(g);g.connect(ac.destination);
- g.gain.value=0.12;o.start();o.stop(ac.currentTime+t);
+// ===== ゲーム状態 =====
+let W = c.width, H = c.height;
+let balls = [], pins = [];
+let score = 0;
+let ballCount = 50;
+let auto = false;
+let kakuhen = false;
+let soundOn = true;
+
+// ===== サウンド =====
+const seFire = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
+const seHit  = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
+
+// ===== リサイズ =====
+function resize(){
+  const s = Math.min(innerWidth / W, (innerHeight - 150) / H);
+  c.style.transform = `scale(${s})`;
+  efx.width = innerWidth;
+  efx.height = innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ===== ボール =====
+class Ball{
+  constructor(){
+    this.x = W/2 + (Math.random()*40 - 20);
+    this.y = 20;
+    this.vx = Math.random()*2 - 1;
+    this.vy = 2;
+    this.r = 5;
+    this.alive = true;
+  }
+  update(){
+    this.vy += 0.06;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if(this.x < this.r || this.x > W - this.r) this.vx *= -1;
+
+    for(const p of pins){
+      const dx = this.x - p.x;
+      const dy = this.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if(d < this.r + p.r){
+        const a = Math.atan2(dy, dx);
+        this.vx = Math.cos(a) * 2.5;
+        this.vy = Math.sin(a) * 2.5;
+      }
+    }
+
+    if(this.y > H - 40){
+      if(this.x > W*0.4 && this.x < W*0.6) hit();
+      this.alive = false;
+    }
+  }
+  draw(){
+    ctx.fillStyle = '#e5e7eb';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+    ctx.fill();
+  }
 }
 
-/* ピン */
-for(let y=140;y<innerHeight-220;y+=60){
- for(let x=30;x<innerWidth;x+=60){
-  pins.push({x,y,r:5});
- }
+// ===== 釘 =====
+function createPins(){
+  pins = [];
+  for(let y=120; y<480; y+=50){
+    for(let x=50; x<W-40; x+=50){
+      pins.push({ x: x + (y%100 ? 25 : 0), y, r: 6 });
+    }
+  }
+}
+createPins();
+
+// ===== 当たり =====
+function hit(){
+  if(soundOn){ seHit.currentTime = 0; seHit.play(); }
+  score += kakuhen ? 500 : 100;
+  confetti();
+  if(Math.random() < 0.25){
+    kakuhen = true;
+    setTimeout(()=>kakuhen=false, 8000);
+  }
 }
 
-/* 発射 */
-function shoot(){
- balls.push({x:c.width/2,y:40,vx:(Math.random()-0.5)*2,vy:2,r:6,alive:true});
- shots++; se(500);
-}
-shootBtn.onclick=shoot;
-c.addEventListener("touchstart",shoot);
-
-/* ボタン */
-autoBtn.onclick=()=>auto=!auto;
-soundBtn.onclick=()=>sound=!sound;
-fsBtn.onclick=()=>document.body.requestFullscreen();
-resetBtn.onclick=()=>{
- localStorage.clear();
- out=best=shots=0;
- ballsSpan.textContent=0;bestSpan.textContent=0;
+// ===== 描画 =====
+function drawPins(){
+  ctx.fillStyle = '#38bdf8';
+  for(const p of pins){
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fill();
+  }
 }
 
-/* キーボード */
-addEventListener("keydown",e=>{
- if(e.key===" ")shoot();
- if(e.key==="a")auto=!auto;
- if(e.key==="f")document.body.requestFullscreen();
+function drawGoal(){
+  ctx.fillStyle = kakuhen ? '#facc15' : '#22c55e';
+  ctx.fillRect(W*0.4, H-30, W*0.2, 20);
+  ctx.fillStyle = '#000';
+  ctx.fillText('GOAL', W*0.47, H-15);
+}
+
+function update(){
+  ctx.clearRect(0,0,W,H);
+  drawPins();
+  drawGoal();
+
+  balls.forEach(b=>b.update());
+  balls = balls.filter(b=>b.alive);
+  balls.forEach(b=>b.draw());
+
+  ballsSpan.textContent = ballCount;
+  scoreSpan.textContent = score;
+  kakuSpan.textContent  = kakuhen ? 'ON' : 'OFF';
+
+  requestAnimationFrame(update);
+}
+update();
+
+// ===== 操作 =====
+function fire(){
+  if(ballCount <= 0) return;
+  if(soundOn){ seFire.currentTime = 0; seFire.play(); }
+  balls.push(new Ball());
+  ballCount--;
+}
+
+fireBtn.onclick = fire;
+autoBtn.onclick = ()=> auto = !auto;
+resetBtn.onclick = ()=>{ balls=[]; score=0; ballCount=50; kakuhen=false; };
+fsBtn.onclick = ()=>{
+  if(!document.fullscreenElement) c.requestFullscreen();
+  else document.exitFullscreen();
+};
+
+setInterval(()=>{ if(auto) fire(); }, 300);
+window.addEventListener('keydown', e=>{
+  if(e.code==='Space') fire();
+  if(e.key==='f') fsBtn.click();
 });
 
-/* 演出 */
-function show(text,color){
- msg.textContent=text;
- msg.style.color=color;
- msg.style.opacity=1;
- setTimeout(()=>msg.style.opacity=0,1000);
-}
-function flash(){
- flashDiv.style.opacity=1;
- setTimeout(()=>flashDiv.style.opacity=0,120);
-}
+// ===== セーブ / ロード =====
+saveBtn.onclick = ()=>{
+  const data = { score, ballCount, kakuhen };
+  localStorage.setItem('pachinkoSave', JSON.stringify(data));
+  alert('セーブしました');
+};
 
-/* ループ */
-function loop(){
- ctx.clearRect(0,0,c.width,c.height);
+loadBtn.onclick = ()=>{
+  const d = localStorage.getItem('pachinkoSave');
+  if(!d){ alert('セーブデータなし'); return; }
+  const data = JSON.parse(d);
+  score = data.score;
+  ballCount = data.ballCount;
+  kakuhen = data.kakuhen;
+};
 
- // ピン
- ctx.fillStyle="#64748b";
- pins.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()});
+soundBtn.onclick = ()=>{
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? 'SOUND ON' : 'SOUND OFF';
+};
 
- // 入賞ゾーン
- const gy=c.height-80;
- ctx.fillStyle=rush?"#fb7185":"#facc15";
- ctx.fillRect(0,gy,c.width,50);
-
- balls.forEach(b=>{
-  if(!b.alive)return;
-  b.vy+=0.08;b.x+=b.vx;b.y+=b.vy;
-  if(b.x<b.r||b.x>c.width-b.r)b.vx*=-1;
-
-  pins.forEach(p=>{
-   const d=Math.hypot(b.x-p.x,b.y-p.y);
-   if(d<b.r+p.r){b.vx+=(b.x-p.x)*0.02;b.vy=-Math.abs(b.vy)}
-  });
-
-  if(b.y>gy){
-   let add=rush?15:5;
-   if(Math.random()<0.08){
-    add=100;rush=true;
-    show("BIG BONUS!","gold");flash();se(1200,0.3);
-   }
-   out+=add;
-   if(out>best){best=out;localStorage.best=best}
-   ballsSpan.textContent=out;
-   bestSpan.textContent=best;
-   modeSpan.textContent=rush?"RUSH":"NORMAL";
-   b.alive=false;se(800);
+// ===== 演出 =====
+function confetti(){
+  for(let i=0;i<80;i++){
+    const x = Math.random()*efx.width;
+    const y = Math.random()*efx.height;
+    ectx.fillStyle = `hsl(${Math.random()*360},80%,60%)`;
+    ectx.fillRect(x,y,4,4);
   }
-
-  ctx.fillStyle="#38bdf8";
-  ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
- });
-
- if(auto && Math.random()<0.04)shoot();
- requestAnimationFrame(loop);
+  setTimeout(()=>ectx.clearRect(0,0,efx.width,efx.height),300);
 }
-loop();
 </script>
 </body>
 </html>
